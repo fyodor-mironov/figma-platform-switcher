@@ -1,0 +1,14 @@
+{
+  "name": "Platform Switcher (Android ⇄ iOS)",
+  "id": "1704144423152616098",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  },
+  "editorType": ["figma"],
+  "capabilities": [],
+  "permissions": []
+}

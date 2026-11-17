@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #ffffff; }
+  body {
+    font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .title {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 17px;
+    color: #A2A2A2;
+  }
+  .row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .cell {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .cell.arrow { cursor: pointer; }
+  .cell.arrow svg {
+    transition: transform 0.35s ease;
+    transform-origin: 50% 50%;
+  }
+  .cell.arrow.flipped svg { transform: rotate(180deg) translateY(-4px); }
+  button {
+    width: 100%;
+    height: 40px;
+    background: #000000;
+    color: #ffffff;
+    border: none;
+    border-radius: 11px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #333333; }
+  button:disabled { background: #A2A2A2; cursor: default; }
+  #log {
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 11px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    max-height: 220px;
+    overflow-y: auto;
+    display: none;
+  }
+  #log.error {
+    color: #D7373F;
+    background: #FFF5F5;
+  }
+</style>
+</head>
+<body>
+  <div class="title">Select a section or frame</div>
+
+  <div class="row">
+    <div class="cell">
+      <svg width="66" height="38" viewBox="0 0 66 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M48.2142 27.7839C47.6686 27.7839 47.1353 27.6221 46.6817 27.319C46.2281 27.0159 45.8746 26.5851 45.6658 26.0811C45.457 25.5771 45.4024 25.0224 45.5088 24.4874C45.6153 23.9523 45.878 23.4608 46.2637 23.075C46.6495 22.6893 47.141 22.4265 47.6761 22.3201C48.2111 22.2137 48.7658 22.2683 49.2698 22.4771C49.7738 22.6859 50.2046 23.0394 50.5077 23.493C50.8108 23.9466 50.9726 24.4799 50.9726 25.0255C50.9726 25.7571 50.682 26.4587 50.1647 26.976C49.6474 27.4933 48.9458 27.7839 48.2142 27.7839ZM17.8433 27.7839C17.2977 27.7839 16.7644 27.6221 16.3108 27.319C15.8572 27.0159 15.5036 26.5851 15.2949 26.0811C15.0861 25.5771 15.0315 25.0224 15.1379 24.4874C15.2443 23.9523 15.507 23.4608 15.8928 23.075C16.2786 22.6893 16.7701 22.4265 17.3051 22.3201C17.8402 22.2137 18.3948 22.2683 18.8989 22.4771C19.4029 22.6859 19.8337 23.0394 20.1368 23.493C20.4399 23.9466 20.6016 24.4799 20.6016 25.0255C20.6016 25.7571 20.311 26.4587 19.7937 26.976C19.2764 27.4933 18.5748 27.7839 17.8433 27.7839ZM49.1911 11.2336L54.7079 1.72292C54.7823 1.5927 54.8303 1.44905 54.8491 1.30022C54.8678 1.1514 54.857 1.00034 54.8172 0.855715C54.7774 0.711091 54.7094 0.575754 54.6172 0.45748C54.5249 0.339205 54.4102 0.240324 54.2796 0.166515C54.149 0.0927064 54.0051 0.0454255 53.8562 0.0273882C53.7073 0.00935087 53.5563 0.0209128 53.4119 0.0614095C53.2675 0.101906 53.1324 0.17054 53.0146 0.263368C52.8968 0.356195 52.7985 0.471388 52.7253 0.602329L47.1511 10.2279C42.7239 8.20482 37.9106 7.16572 33.0431 7.18222C28.1699 7.17029 23.3502 8.19887 18.9064 10.1992L13.3322 0.573596C13.1828 0.312239 12.936 0.120679 12.6457 0.0408091C12.3554 -0.0390603 12.0454 -0.000739119 11.7833 0.147392C11.5212 0.295523 11.3285 0.541409 11.2472 0.831274C11.1659 1.12114 11.2027 1.43139 11.3496 1.69419L16.8376 11.2049C12.0925 13.7928 8.06768 17.5234 5.12767 22.0588C2.18765 26.5943 0.42525 31.7914 0 37.1796H66C65.5878 31.7952 63.8336 26.5997 60.8974 22.0675C57.9613 17.5353 53.9367 13.8107 49.1911 11.2336Z" fill="#3DDC84"/>
+      </svg>
+    </div>
+    <div class="cell arrow" id="arrowCell" title="Reverse switch direction">
+      <svg width="44" height="13" viewBox="0 0 44 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M40.5744 0.0300985C41.1102 -0.103851 41.6534 0.221844 41.7873 0.757643L43.97 9.48915C44.1038 10.0249 43.7781 10.5671 43.2424 10.7011L34.5119 12.8847C33.9762 13.0186 33.4331 12.6927 33.299 12.1571C33.165 11.6213 33.4907 11.0782 34.0265 10.9442L40.3322 9.36708C26.1388 1.76142 10.7693 2.28413 1.66886 10.4745C1.25837 10.844 0.626209 10.8108 0.25674 10.4003C-0.112704 9.9898 -0.0794991 9.35764 0.330959 8.98817C10.3025 0.0138246 26.7336 -0.25766 41.4621 7.70496L39.8469 1.243C39.713 0.707353 40.0389 0.164244 40.5744 0.0300985Z" fill="#A2A2A2"/>
+      </svg>
+    </div>
+    <div class="cell">
+      <svg width="39" height="47" viewBox="0 0 39 47" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M26.0531 7.5048C24.4619 9.4285 21.8019 10.8535 19.6882 10.8535C19.427 10.8535 19.1895 10.806 19.047 10.7822C19.0232 10.6635 18.952 10.3072 18.952 9.92724C18.952 7.5048 20.187 5.08237 21.5407 3.56241C23.2269 1.56746 26.0768 0.0949975 28.4517 0C28.4992 0.261243 28.523 0.593734 28.523 0.926225C28.523 3.34866 27.5018 5.74735 26.0531 7.5048ZM27.7155 11.3522C29.0455 11.3522 33.8666 11.4947 37.0253 16.0308C36.7403 16.2446 31.9667 18.952 31.9667 24.9843C31.9667 31.9429 38.0465 34.4366 38.2365 34.4841C38.2127 34.6503 37.2628 37.8565 35.0303 41.1577C33.0116 44.0313 30.8979 46.9525 27.7155 46.9525C24.5093 46.9525 23.6781 45.0763 20.0207 45.0763C16.4108 45.0763 15.1283 47 12.2309 47C9.286 47 7.24356 44.3163 4.91612 41.0389C2.18494 37.1678 0 31.1592 0 25.4593C0 16.3396 5.93734 11.4947 11.8034 11.4947C14.8909 11.4947 17.4558 13.5134 19.427 13.5134C21.2794 13.5134 24.1769 11.3522 27.7155 11.3522Z" fill="black"/>
+      </svg>
+    </div>
+  </div>
+
+  <button id="run">Switch</button>
+  <div id="log"></div>
+
+<script>
+  const btn = document.getElementById('run');
+  const log = document.getElementById('log');
+  const arrowCell = document.getElementById('arrowCell');
+
+  // false: Android → iOS; true: iOS → Android
+  let reverse = false;
+
+  arrowCell.onclick = () => {
+    reverse = !reverse;
+    arrowCell.classList.toggle('flipped', reverse);
+  };
+
+  btn.onclick = () => {
+    btn.disabled = true;
+    parent.postMessage({ pluginMessage: { type: 'run', reverse } }, '*');
+  };
+
+  onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg || (msg.type !== 'done' && msg.type !== 'error')) return;
+    btn.disabled = false;
+
+    log.classList.remove('error');
+
+    if (msg.type === 'error') {
+      const lines = [
+        'Cannot switch: some components reference a broken library or deleted components.',
+        'Fix the library connection first, then try again.',
+        '',
+      ];
+      msg.names.forEach((n) => lines.push('• ' + n));
+      if (msg.total > msg.names.length) {
+        lines.push(`…and ${msg.total - msg.names.length} more`);
+      }
+      log.classList.add('error');
+      log.style.display = 'block';
+      log.textContent = lines.join('\n');
+      return;
+    }
+
+    const r = msg.report;
+    const lines = [];
+    if (msg.empty) {
+      const from = reverse ? 'iOS' : 'Android';
+      lines.push(`Select a frame or section with components where Platform = ${from}.`);
+    } else {
+      lines.push('✅ Switched');
+      lines.push(`Root instances: ${r.switched}`);
+      lines.push(`Nested components: ${r.nestedSwitched}`);
+    }
+    log.style.display = 'block';
+    log.textContent = lines.join('\n');
+  };
+</script>
+</body>
+</html>
