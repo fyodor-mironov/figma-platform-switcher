@@ -169,6 +169,32 @@ function locate(root, path) {
   return node;
 }
 
+function locateLoose(root, path) {
+  const exact = locate(root, path);
+  if (exact) return exact;
+  if (path.length === 0) return null;
+  const targetName = path[path.length - 1].name;
+  const depth = path.length;
+  let found = null;
+  const walk = (node, d) => {
+    if (found) return;
+    if (d === depth && node.name === targetName) {
+      found = node;
+      return;
+    }
+    let children = null;
+    try {
+      children = 'children' in node ? node.children : null;
+    } catch (e) {
+      return;
+    }
+    if (!children) return;
+    for (const c of children) walk(c, d + 1);
+  };
+  walk(root, 0);
+  return found;
+}
+
 async function mapSwapComponent(compKey, propName, toValue) {
   let comp;
   try {
@@ -243,7 +269,7 @@ async function switchInstance(inst, propName, fromValue, toValue, report) {
   for (const item of sorted) {
     if (item.path.length === 0) continue;
 
-    const node = locate(inst, item.path);
+    const node = locateLoose(inst, item.path);
     if (!node) continue;
 
     if (item.fills) {
