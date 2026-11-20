@@ -185,11 +185,12 @@ async function switchPlatformModes(root, fromValue, toValue) {
       for (const [collectionId, modeId] of Object.entries(modes)) {
         const collection = await getCollection(collectionId);
         if (!collection) continue;
-        if (collection.name.toLowerCase() !== 'platform') continue;
+        const collName = (collection.name || '').toLowerCase();
+        if (!collName.includes('platform') && !collName.includes('appearance')) continue;
         const cur = collection.modes.find((m) => m.modeId === modeId);
-        if (!cur || cur.name.toLowerCase() !== fromValue.toLowerCase()) continue;
+        if (!cur || !cur.name.toLowerCase().includes(fromValue.toLowerCase())) continue;
         const target = collection.modes.find(
-          (m) => m.name.toLowerCase() === toValue.toLowerCase()
+          (m) => m.name.toLowerCase().includes(toValue.toLowerCase())
         );
         if (!target) continue;
         try {
