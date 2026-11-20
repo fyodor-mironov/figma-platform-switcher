@@ -30,12 +30,10 @@ figma.ui.onmessage = async (msg) => {
       return;
     }
 
-    for (const node of figma.currentPage.selection) {
-      try {
-        await switchPlatformModes(node, fromValue, toValue);
-      } catch (e) {
-        // skip
-      }
+    try {
+      await switchPlatformModes(figma.currentPage.selection, toValue);
+    } catch (e) {
+      // skip
     }
 
     if (roots.length === 0) {
@@ -161,8 +159,10 @@ function snapshot(root) {
   return items;
 }
 
-async function switchPlatformModes(root, fromValue, toValue) {
+async function switchPlatformModes(roots, toValue) {
   const cache = {};
+  const platformCollections = [];
+
   const getCollection = async (id) => {
     if (!(id in cache)) {
       try {
@@ -174,7 +174,28 @@ async function switchPlatformModes(root, fromValue, toValue) {
     return cache[id];
   };
 
-  const walk = async (node) => {
+  const isPlatformCollection = (c) => {
+    const n = (c && c.name ? c.name : '').toLowerCase();
+    return n.includes('platform') || n.includes('appearance');
+  };
+
+  const register = (c) => {
+    if (!c || !isPlatformCollection(c)) return;
+    if (!platformCollections.some((p) => p.id === c.id)) platformCollections.push(c);
+  };
+
+  try {
+    for (const c of await figma.variables.getLocalVariableCollectionsAsync()) {
+      register(c);
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  const targetModeOf = (collection) =>
+    collection.modes.find((m) => m.name.toLowerCase().includes(toValue.toLowerCase()));
+
+  const applyTo = async (node, force) => {
     let modes = null;
     try {
       modes = node.explicitVariableModes || null;
@@ -182,24 +203,34 @@ async function switchPlatformModes(root, fromValue, toValue) {
       modes = null;
     }
     if (modes) {
-      for (const [collectionId, modeId] of Object.entries(modes)) {
+      for (const [collectionId] of Object.entries(modes)) {
         const collection = await getCollection(collectionId);
-        if (!collection) continue;
-        const collName = (collection.name || '').toLowerCase();
-        if (!collName.includes('platform') && !collName.includes('appearance')) continue;
-        const cur = collection.modes.find((m) => m.modeId === modeId);
-        if (!cur || !cur.name.toLowerCase().includes(fromValue.toLowerCase())) continue;
-        const target = collection.modes.find(
-          (m) => m.name.toLowerCase().includes(toValue.toLowerCase())
-        );
+        if (!collection || !isPlatformCollection(collection)) continue;
+        register(collection);
+        const target = targetModeOf(collection);
         if (!target) continue;
         try {
-          node.setExplicitVariableModeForCollection(collectionId, target.modeId);
+          node.setExplicitVariableModeForCollection(collection.id, target.modeId);
         } catch (e) {
           // skip
         }
       }
     }
+    if (force) {
+      for (const c of platformCollections) {
+        const target = targetModeOf(c);
+        if (!target) continue;
+        try {
+          node.setExplicitVariableModeForCollection(c.id, target.modeId);
+        } catch (e) {
+          // skip
+        }
+      }
+    }
+  };
+
+  const walk = async (node) => {
+    await applyTo(node, false);
     let children = null;
     try {
       children = 'children' in node ? node.children : null;
@@ -209,7 +240,9 @@ async function switchPlatformModes(root, fromValue, toValue) {
     if (!children) return;
     for (const c of children) await walk(c);
   };
-  await walk(root);
+
+  for (const root of roots) await walk(root);
+  for (const root of roots) await applyTo(root, true);
 }
 
 function locate(root, path) {
