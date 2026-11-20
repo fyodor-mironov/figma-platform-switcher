@@ -162,16 +162,19 @@ function snapshot(root) {
 }
 
 async function switchPlatformModes(root, fromValue, toValue) {
-  const collections = {};
-  try {
-    for (const c of await figma.variables.getLocalVariableCollectionsAsync()) {
-      collections[c.id] = c;
+  const cache = {};
+  const getCollection = async (id) => {
+    if (!(id in cache)) {
+      try {
+        cache[id] = await figma.variables.getVariableCollectionByIdAsync(id);
+      } catch (e) {
+        cache[id] = null;
+      }
     }
-  } catch (e) {
-    return;
-  }
+    return cache[id];
+  };
 
-  const walk = (node) => {
+  const walk = async (node) => {
     let modes = null;
     try {
       modes = node.explicitVariableModes || null;
@@ -180,8 +183,9 @@ async function switchPlatformModes(root, fromValue, toValue) {
     }
     if (modes) {
       for (const [collectionId, modeId] of Object.entries(modes)) {
-        const collection = collections[collectionId];
+        const collection = await getCollection(collectionId);
         if (!collection) continue;
+        if (collection.name.toLowerCase() !== 'platform') continue;
         const cur = collection.modes.find((m) => m.modeId === modeId);
         if (!cur || cur.name.toLowerCase() !== fromValue.toLowerCase()) continue;
         const target = collection.modes.find(
@@ -202,9 +206,9 @@ async function switchPlatformModes(root, fromValue, toValue) {
       return;
     }
     if (!children) return;
-    for (const c of children) walk(c);
+    for (const c of children) await walk(c);
   };
-  walk(root);
+  await walk(root);
 }
 
 function locate(root, path) {
