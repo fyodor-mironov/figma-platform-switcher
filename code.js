@@ -29,6 +29,15 @@ figma.ui.onmessage = async (msg) => {
       });
       return;
     }
+
+    for (const node of figma.currentPage.selection) {
+      try {
+        await switchPlatformModes(node, fromValue, toValue);
+      } catch (e) {
+        // skip
+      }
+    }
+
     if (roots.length === 0) {
       figma.ui.resize(290, 290);
       figma.ui.postMessage({ type: 'done', report, empty: true });
@@ -150,6 +159,52 @@ function snapshot(root) {
   };
   walk(root, []);
   return items;
+}
+
+async function switchPlatformModes(root, fromValue, toValue) {
+  const collections = {};
+  try {
+    for (const c of await figma.variables.getLocalVariableCollectionsAsync()) {
+      collections[c.id] = c;
+    }
+  } catch (e) {
+    return;
+  }
+
+  const walk = (node) => {
+    let modes = null;
+    try {
+      modes = node.explicitVariableModes || null;
+    } catch (e) {
+      modes = null;
+    }
+    if (modes) {
+      for (const [collectionId, modeId] of Object.entries(modes)) {
+        const collection = collections[collectionId];
+        if (!collection) continue;
+        const cur = collection.modes.find((m) => m.modeId === modeId);
+        if (!cur || cur.name.toLowerCase() !== fromValue.toLowerCase()) continue;
+        const target = collection.modes.find(
+          (m) => m.name.toLowerCase() === toValue.toLowerCase()
+        );
+        if (!target) continue;
+        try {
+          node.setExplicitVariableModeForCollection(collectionId, target.modeId);
+        } catch (e) {
+          // skip
+        }
+      }
+    }
+    let children = null;
+    try {
+      children = 'children' in node ? node.children : null;
+    } catch (e) {
+      return;
+    }
+    if (!children) return;
+    for (const c of children) walk(c);
+  };
+  walk(root);
 }
 
 function locate(root, path) {
