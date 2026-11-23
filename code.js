@@ -141,6 +141,25 @@ function snapshot(root) {
       // skip
     }
     if (fills) items.push({ path, fills });
+    let bound = null;
+    try {
+      if ('boundVariables' in node && node.boundVariables) {
+        const bv = node.boundVariables;
+        const pick = {};
+        for (const f of ['fills', 'strokes']) {
+          if (
+            Array.isArray(bv[f]) &&
+            bv[f].some((b) => b && b.type === 'VARIABLE_ALIAS')
+          ) {
+            pick[f] = bv[f].map((b) => (b && b.type === 'VARIABLE_ALIAS' ? b.id : null));
+          }
+        }
+        if (Object.keys(pick).length) bound = pick;
+      }
+    } catch (e) {
+      // skip
+    }
+    if (bound) items.push({ path, bound });
     let children;
     try {
       children = 'children' in node ? node.children : null;
@@ -175,8 +194,9 @@ async function switchPlatformModes(roots, toValue) {
   };
 
   const isPlatformCollection = (c) => {
-    const n = (c && c.name ? c.name : '').toLowerCase();
-    return n.includes('platform') || n.includes('appearance');
+    if (!c || !Array.isArray(c.modes)) return false;
+    const names = c.modes.map((m) => (m.name || '').toLowerCase());
+    return names.some((n) => n.includes('android')) && names.some((n) => n.includes('ios'));
   };
 
   const register = (c) => {
@@ -205,14 +225,16 @@ async function switchPlatformModes(roots, toValue) {
     if (modes) {
       for (const [collectionId] of Object.entries(modes)) {
         const collection = await getCollection(collectionId);
+        console.log('[PS] collection:', collection ? collection.name : 'unresolved', collectionId);
         if (!collection || !isPlatformCollection(collection)) continue;
         register(collection);
         const target = targetModeOf(collection);
         if (!target) continue;
         try {
-          node.setExplicitVariableModeForCollection(collection.id, target.modeId);
+          node.setExplicitVariableModeForCollection(collection, target.modeId);
+          console.log('[PS] set mode on', node.name, '→', target.name);
         } catch (e) {
-          // skip
+          console.log('[PS] set mode failed on', node.name, e);
         }
       }
     }
@@ -221,9 +243,10 @@ async function switchPlatformModes(roots, toValue) {
         const target = targetModeOf(c);
         if (!target) continue;
         try {
-          node.setExplicitVariableModeForCollection(c.id, target.modeId);
+          node.setExplicitVariableModeForCollection(c, target.modeId);
+          console.log('[PS] force set mode on', node.name, '→', target.name);
         } catch (e) {
-          // skip
+          console.log('[PS] force set failed on', node.name, e);
         }
       }
     }
@@ -289,11 +312,19 @@ function locateLoose(root, path) {
 }
 
 async function mapSwapComponent(compKey, propName, toValue) {
-  let comp;
+  let comp = null;
   try {
-    comp = await figma.importComponentByKeyAsync(compKey);
+    const node = await figma.getNodeByIdAsync(compKey);
+    if (node && node.type === 'COMPONENT') comp = node;
   } catch (e) {
-    return null;
+    // not a local component id
+  }
+  if (!comp) {
+    try {
+      comp = await figma.importComponentByKeyAsync(compKey);
+    } catch (e) {
+      return null;
+    }
   }
   if (comp && comp.parent && comp.parent.type === 'COMPONENT_SET') {
     const orig = comp.variantProperties || {};
@@ -309,6 +340,62 @@ async function mapSwapComponent(compKey, propName, toValue) {
     if (match) return match.key;
   }
   return comp ? comp.key : null;
+}
+
+const varCollectionCache = {};
+
+async function getVarCollection(id) {
+  if (!(id in varCollectionCache)) {
+    try {
+      varCollectionCache[id] = await figma.variables.getVariableCollectionByIdAsync(id);
+    } catch (e) {
+      varCollectionCache[id] = null;
+    }
+  }
+  return varCollectionCache[id];
+}
+
+async function findVariableByName(collection, name) {
+  for (const id of collection.variableIds) {
+    try {
+      const v = await figma.variables.getVariableByIdAsync(id);
+      if (v && v.name === name) return v;
+    } catch (e) {
+      // skip
+    }
+  }
+  return null;
+}
+
+async function mapPlatformVariable(variable, fromValue, toValue) {
+  if (!variable) return null;
+  const from = fromValue.toLowerCase();
+  const to = toValue.toLowerCase();
+  const collection = await getVarCollection(variable.variableCollectionId);
+
+  if (collection && variable.name.toLowerCase().includes(from)) {
+    const v = await findVariableByName(
+      collection,
+      variable.name.replace(new RegExp(fromValue, 'i'), toValue)
+    );
+    if (v) return v;
+  }
+
+  if (collection && collection.name.toLowerCase().includes(from)) {
+    const wanted = collection.name.toLowerCase().replace(from, to);
+    try {
+      for (const c of await figma.variables.getLocalVariableCollectionsAsync()) {
+        if (c.id === collection.id) continue;
+        if (c.name.toLowerCase() !== wanted) continue;
+        const v = await findVariableByName(c, variable.name);
+        if (v) return v;
+      }
+    } catch (e) {
+      // skip
+    }
+  }
+
+  return null;
 }
 
 async function resolveTargetVariant(inst, propName, toValue) {
@@ -370,6 +457,34 @@ async function switchInstance(inst, propName, fromValue, toValue, report) {
         node.fills = item.fills;
       } catch (e) {
         // skip this node
+      }
+    }
+
+    if (item.bound) {
+      for (const field of Object.keys(item.bound)) {
+        let alreadyBound = false;
+        try {
+          const bv = node.boundVariables;
+          alreadyBound =
+            bv &&
+            Array.isArray(bv[field]) &&
+            bv[field].some((b) => b && b.type === 'VARIABLE_ALIAS');
+        } catch (e) {
+          alreadyBound = false;
+        }
+        if (alreadyBound) continue;
+
+        for (const varId of item.bound[field]) {
+          if (!varId) continue;
+          try {
+            let variable = await figma.variables.getVariableByIdAsync(varId);
+            const mapped = await mapPlatformVariable(variable, fromValue, toValue);
+            if (mapped) variable = mapped;
+            if (variable) node.setBoundVariable(field, variable);
+          } catch (e) {
+            // skip this binding
+          }
+        }
       }
     }
 
