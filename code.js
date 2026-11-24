@@ -30,12 +30,6 @@ figma.ui.onmessage = async (msg) => {
       return;
     }
 
-    try {
-      await switchPlatformModes(figma.currentPage.selection, toValue);
-    } catch (e) {
-      // skip
-    }
-
     if (roots.length === 0) {
       figma.ui.resize(290, 290);
       figma.ui.postMessage({ type: 'done', report, empty: true });
@@ -49,6 +43,12 @@ figma.ui.onmessage = async (msg) => {
       } catch (e) {
         // skip this instance and continue with the rest
       }
+    }
+
+    try {
+      await switchPlatformModes(figma.currentPage.selection, toValue);
+    } catch (e) {
+      // skip
     }
   } catch (e) {
     // ignore
