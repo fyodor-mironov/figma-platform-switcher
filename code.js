@@ -1,8 +1,15 @@
 const PROP_NAME = 'Platform';
 
-figma.showUI(__html__, { width: 290, height: 201, title: 'Platform Switcher' });
+// Префиксы платформенных токенов в библиотеках Variables.
+const PLATFORM_VAR_PREFIXES = { android: 'A_MZ', ios: 'I_MZ' };
+
+figma.showUI(__html__, { width: 290, height: 201, title: 'Platform Linter' });
 
 figma.ui.onmessage = async (msg) => {
+  if (msg.type === 'lint') { await handleLint(msg); return; }
+  if (msg.type === 'listIosTokens') { await handleListIosTokens(msg); return; }
+  if (msg.type === 'previewColors') { await handlePreviewColors(msg); return; }
+  if (msg.type === 'remap') { await handleRemap(msg); return; }
   if (msg.type !== 'run') return;
 
   const fromValue = msg.reverse ? 'iOS' : 'Android';
@@ -278,7 +285,7 @@ function locate(root, path) {
       return null;
     }
     if (!children) return null;
-    const sameName = children.filter((c) => c.name === seg.name);
+    const sameName = node.children.filter((c) => c.name === seg.name);
     node = sameName[seg.idx];
     if (!node) return null;
   }
@@ -344,6 +351,42 @@ async function mapSwapComponent(compKey, propName, toValue) {
 
 const varCollectionCache = {};
 
+// Индекс библиотечных переменных (имя -> key) для автомаппинга
+// префиксных платформенных токенов (A_MZ ⇄ I_MZ). Строится один раз.
+let libVarIndexPromise = null;
+
+async function findLibraryVariableByName(name) {
+  if (!libVarIndexPromise) {
+    libVarIndexPromise = (async () => {
+      const index = new Map();
+      try {
+        const cols = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+        for (const col of cols) {
+          try {
+            const vars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(col.key);
+            for (const v of vars) {
+              if (!index.has(v.name)) index.set(v.name, v.key);
+            }
+          } catch (e) {
+            // коллекция недоступна — пропускаем
+          }
+        }
+      } catch (e) {
+        // teamLibrary недоступен
+      }
+      return index;
+    })();
+  }
+  const index = await libVarIndexPromise;
+  const key = index.get(name);
+  if (!key) return null;
+  try {
+    return await figma.variables.importVariableByKeyAsync(key);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function getVarCollection(id) {
   if (!(id in varCollectionCache)) {
     try {
@@ -372,6 +415,17 @@ async function mapPlatformVariable(variable, fromValue, toValue) {
   const from = fromValue.toLowerCase();
   const to = toValue.toLowerCase();
   const collection = await getVarCollection(variable.variableCollectionId);
+
+  // Префиксный маппинг платформенных токенов: A_MZ/... ⇄ I_MZ/...
+  // Ищем токен с тем же именем, но префиксом целевой платформы,
+  // среди опубликованных библиотек Variables.
+  const fromPrefix = PLATFORM_VAR_PREFIXES[from];
+  const toPrefix = PLATFORM_VAR_PREFIXES[to];
+  if (fromPrefix && toPrefix && variable.name.startsWith(fromPrefix)) {
+    const mappedName = toPrefix + variable.name.slice(fromPrefix.length);
+    const v = await findLibraryVariableByName(mappedName);
+    if (v) return v;
+  }
 
   if (collection && variable.name.toLowerCase().includes(from)) {
     const v = await findVariableByName(
@@ -454,7 +508,25 @@ async function switchInstance(inst, propName, fromValue, toValue, report) {
 
     if (item.fills) {
       try {
-        node.fills = item.fills;
+        // Переносим только image-paint'ы (загруженные картинки сбрасываются
+        // при смене варианта). Остальные краски берём из нового варианта,
+        // чтобы не затереть его собственные привязки переменных: на разных
+        // платформах у компонента могут быть разные токены, и они должны
+        // сохраняться.
+        const current = Array.isArray(node.fills) ? node.fills.slice() : [];
+        let touched = false;
+        for (let i = 0; i < item.fills.length; i++) {
+          const snapPaint = item.fills[i];
+          if (snapPaint && snapPaint.type === 'IMAGE') {
+            if (i < current.length) {
+              current[i] = snapPaint;
+            } else {
+              current.push(snapPaint);
+            }
+            touched = true;
+          }
+        }
+        if (touched) node.fills = current;
       } catch (e) {
         // skip this node
       }
@@ -462,27 +534,77 @@ async function switchInstance(inst, propName, fromValue, toValue, report) {
 
     if (item.bound) {
       for (const field of Object.keys(item.bound)) {
-        let alreadyBound = false;
+        const ids = item.bound[field];
+        let paints = null;
         try {
-          const bv = node.boundVariables;
-          alreadyBound =
-            bv &&
-            Array.isArray(bv[field]) &&
-            bv[field].some((b) => b && b.type === 'VARIABLE_ALIAS');
+          paints = Array.isArray(node[field]) ? node[field] : null;
         } catch (e) {
-          alreadyBound = false;
+          paints = null;
         }
-        if (alreadyBound) continue;
+        if (!paints) continue;
 
-        for (const varId of item.bound[field]) {
+        let currentBound = null;
+        try {
+          currentBound = node.boundVariables;
+        } catch (e) {
+          currentBound = null;
+        }
+
+        // Привязка переменных к fills/strokes делается к каждому paint
+        // отдельно через setBoundVariableForPaint — к полю целиком
+        // привязать нельзя.
+        const updated = paints.slice();
+        let changed = false;
+
+        for (let i = 0; i < ids.length && i < updated.length; i++) {
+          const varId = ids[i];
           if (!varId) continue;
+
+          // Не трогаем paint, у которого новый вариант уже имеет привязку.
+          const alreadyBound =
+            currentBound &&
+            Array.isArray(currentBound[field]) &&
+            currentBound[field][i] &&
+            currentBound[field][i].type === 'VARIABLE_ALIAS';
+          if (alreadyBound) continue;
+
           try {
             let variable = await figma.variables.getVariableByIdAsync(varId);
+            if (!variable) continue;
+
+            // Платформенный токен (A_MZ/I_MZ) переносим только через
+            // маппинг на токен целевой платформы. Если аналога нет —
+            // не привязываем исходный токен: на другой платформе у
+            // компонента может быть назначен свой токен, и он не должен
+            // ломаться.
+            const fromPrefix = PLATFORM_VAR_PREFIXES[fromValue.toLowerCase()];
+            const isPlatformToken = fromPrefix && variable.name.startsWith(fromPrefix);
+
             const mapped = await mapPlatformVariable(variable, fromValue, toValue);
-            if (mapped) variable = mapped;
-            if (variable) node.setBoundVariable(field, variable);
+            if (mapped) {
+              variable = mapped;
+            } else if (isPlatformToken) {
+              // Нет аналога на целевой платформе — не тащим исходный токен,
+              // оставляем привязку, назначенную в варианте.
+              continue;
+            }
+
+            updated[i] = figma.variables.setBoundVariableForPaint(
+              updated[i],
+              'color',
+              variable
+            );
+            changed = true;
           } catch (e) {
             // skip this binding
+          }
+        }
+
+        if (changed) {
+          try {
+            node[field] = updated;
+          } catch (e) {
+            // skip this node
           }
         }
       }
@@ -543,4 +665,240 @@ async function switchInstance(inst, propName, fromValue, toValue, report) {
       }
     }
   }
+}
+
+// ---------- Линтер токенов ----------
+
+const LINT_WINDOW_HEIGHT = 520;
+
+// Возвращает CSS-представление цвета переменной (первый режим коллекции)
+// или null, если переменная не цветовая / значение — алиас.
+function variableColorCss(variable) {
+  try {
+    if (!variable || variable.resolvedType !== 'COLOR') return null;
+    const vals = variable.valuesByMode;
+    const modeIds = Object.keys(vals);
+    if (!modeIds.length) return null;
+    const v = vals[modeIds[0]];
+    if (!v || typeof v !== 'object' || v.type === 'VARIABLE_ALIAS') return null;
+    if (typeof v.r !== 'number') return null;
+    const r = Math.round(v.r * 255);
+    const g = Math.round(v.g * 255);
+    const b = Math.round(v.b * 255);
+    const a = typeof v.a === 'number' ? v.a : 1;
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Собирает все алиасы переменных из node.boundVariables:
+// [{ field, id, index? }] — для массивов красок (fills, strokes) запоминается
+// индекс конкретного paint'а: переменные на fills/strokes привязываются
+// не к полю целиком, а к каждому paint отдельно (setBoundVariableForPaint).
+function boundAliases(node) {
+  let bv = null;
+  try {
+    bv = node.boundVariables;
+  } catch (e) {
+    return [];
+  }
+  if (!bv) return [];
+  const out = [];
+  for (const [field, value] of Object.entries(bv)) {
+    if (!value) continue;
+    if (Array.isArray(value)) {
+      value.forEach((alias, index) => {
+        if (alias && alias.type === 'VARIABLE_ALIAS' && alias.id) {
+          out.push({ field, id: alias.id, index });
+        }
+      });
+    } else if (value.type === 'VARIABLE_ALIAS' && value.id) {
+      out.push({ field, id: value.id });
+    }
+  }
+  return out;
+}
+
+function collectAllNodes(roots) {
+  const nodes = [];
+  const walk = (node) => {
+    nodes.push(node);
+    let children = null;
+    try {
+      children = 'children' in node ? node.children : null;
+    } catch (e) {
+      children = null;
+    }
+    if (children) {
+      for (const child of children) walk(child);
+    }
+  };
+  for (const r of roots) walk(r);
+  return nodes;
+}
+
+// Сканирует выделение и находит ноды с привязанными переменными,
+// чьи имена начинаются с заданного префикса (по умолчанию A_MZ).
+async function handleLint(msg) {
+  const prefix = (msg.prefix || 'A_MZ').trim();
+
+  try {
+    await figma.currentPage.loadAsync();
+
+    if (figma.currentPage.selection.length === 0) {
+      figma.ui.postMessage({ type: 'lintDone', tokens: [], empty: true });
+      return;
+    }
+
+    const nodes = collectAllNodes(figma.currentPage.selection);
+    const varCache = new Map(); // variableId -> variable | null
+    const byToken = new Map();  // tokenName -> { name, usages: [] }
+
+    for (const node of nodes) {
+      const aliases = boundAliases(node);
+      if (aliases.length === 0) continue;
+
+      for (const { field, id, index } of aliases) {
+        if (!varCache.has(id)) {
+          let v = null;
+          try {
+            v = await figma.variables.getVariableByIdAsync(id);
+          } catch (e) {
+            v = null; // недоступная переменная (например, из удалённой библиотеки)
+          }
+          varCache.set(id, v);
+        }
+        const variable = varCache.get(id);
+        if (!variable || !variable.name.startsWith(prefix)) continue;
+
+        let entry = byToken.get(variable.name);
+        if (!entry) {
+          entry = { name: variable.name, color: variableColorCss(variable), usages: [] };
+          byToken.set(variable.name, entry);
+        }
+        if (!entry.usages.some(
+          (u) => u.nodeId === node.id && u.field === field && u.index === index
+        )) {
+          entry.usages.push({ nodeId: node.id, nodeName: node.name, field, index });
+        }
+      }
+    }
+
+    const tokens = Array.from(byToken.values())
+      .map((t) => ({ name: t.name, color: t.color, count: t.usages.length, usages: t.usages }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    figma.ui.resize(290, LINT_WINDOW_HEIGHT);
+    figma.ui.postMessage({ type: 'lintDone', tokens });
+  } catch (e) {
+    figma.ui.postMessage({ type: 'lintDone', tokens: [], error: e.message });
+  }
+}
+
+// Возвращает полный список токенов с заданным префиксом (по умолчанию I_MZ)
+// из всех доступных библиотек Variables.
+async function handleListIosTokens(msg) {
+  const prefix = (msg.prefix || 'I_MZ').trim();
+
+  try {
+    const collections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+    const tokens = [];
+
+    for (const col of collections) {
+      let vars = [];
+      try {
+        vars = await figma.teamLibrary.getVariablesInLibraryCollectionAsync(col.key);
+      } catch (e) {
+        continue; // коллекция недоступна — пропускаем
+      }
+      for (const v of vars) {
+        if (v.name.startsWith(prefix)) {
+          tokens.push({
+            name: v.name,
+            key: v.key,
+            library: col.libraryName,
+            collection: col.name,
+          });
+        }
+      }
+    }
+
+    tokens.sort((a, b) => a.name.localeCompare(b.name));
+    figma.ui.postMessage({ type: 'iosTokens', tokens });
+  } catch (e) {
+    figma.ui.postMessage({ type: 'iosTokens', tokens: [], error: e.message });
+  }
+}
+
+// Резолвит цвета для видимых в списке библиотечных токенов.
+// Значения библиотечных переменных доступны только после импорта,
+// поэтому UI запрашивает превью порциями — только для отображаемых ключей.
+async function handlePreviewColors(msg) {
+  const keys = Array.isArray(msg.keys) ? msg.keys.slice(0, 150) : [];
+  const colors = {};
+
+  for (const key of keys) {
+    try {
+      const v = await figma.variables.importVariableByKeyAsync(key);
+      colors[key] = v ? variableColorCss(v) : null;
+    } catch (e) {
+      colors[key] = null;
+    }
+  }
+
+  figma.ui.postMessage({ type: 'tokenColors', colors });
+}
+
+// Перебиндивает переданные привязки (нода + поле [+ индекс paint'а])
+// на выбранный iOS-токен.
+async function handleRemap(msg) {
+  const iosKey = msg.iosKey;
+  const iosName = msg.iosName || iosKey;
+  const usages = Array.isArray(msg.usages) ? msg.usages : [];
+  const report = { replaced: 0, failed: [] };
+
+  try {
+    const variable = await figma.variables.importVariableByKeyAsync(iosKey);
+    if (!variable) throw new Error('cannot import library variable');
+
+    for (const u of usages) {
+      try {
+        const node = await figma.getNodeByIdAsync(u.nodeId);
+        if (!node) throw new Error('node not found');
+
+        if (
+          (u.field === 'fills' || u.field === 'strokes') &&
+          typeof u.index === 'number'
+        ) {
+          // Привязка к конкретному paint: клонируем массив красок,
+          // подменяем нужный paint версией с привязанной переменной.
+          const paints = node[u.field];
+          if (!Array.isArray(paints) || !paints[u.index]) {
+            throw new Error(`paint #${u.index} not found in ${u.field}`);
+          }
+          const updated = paints.slice();
+          updated[u.index] = figma.variables.setBoundVariableForPaint(
+            updated[u.index],
+            'color',
+            variable
+          );
+          node[u.field] = updated;
+        } else {
+          if (typeof node.setBoundVariable !== 'function') {
+            throw new Error('node does not support variable binding');
+          }
+          node.setBoundVariable(u.field, variable);
+        }
+        report.replaced++;
+      } catch (e) {
+        const where = typeof u.index === 'number' ? `${u.field}[${u.index}]` : u.field;
+        report.failed.push(`"${u.nodeName || u.nodeId}" (${where}): ${e.message}`);
+      }
+    }
+  } catch (e) {
+    report.failed.push('General error: ' + e.message);
+  }
+
+  figma.ui.postMessage({ type: 'remapDone', iosName, report });
 }
