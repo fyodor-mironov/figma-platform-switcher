@@ -1,14 +1,11 @@
 {
-  "name": "Platform Switcher (Android ⇄ iOS)",
-  "id": "1704144423152616098",
+  "name": "Platform Linter",
+  "id": "1490277351029384756",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
   "documentAccess": "dynamic-page",
-  "networkAccess": {
-    "allowedDomains": ["none"]
-  },
   "editorType": ["figma"],
   "capabilities": [],
-  "permissions": []
+  "permissions": ["teamlibrary"]
 }

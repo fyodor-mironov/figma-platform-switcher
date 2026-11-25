@@ -1,61 +1,65 @@
-# Platform Switcher (Android ⇄ iOS)
+# Platform Linter
 
-A Figma plugin that switches the **Platform** variant property of components
-from Android to iOS (or back) in one click.
+Новая версия плагина Platform Switcher с функцией линтера токенов:
+после переключения платформы находит оставшиеся токены Android (префикс `A_MZ`),
+показывает их списком и позволяет перебиндить ноды на токены iOS (префикс `I_MZ`)
+из библиотек Figma Variables — клик по Android-токену открывает полный список
+iOS-токенов, клик по iOS-токену заменяет привязку.
 
-![Interface](https://img.shields.io/badge/Figma-Plugin-black)
+---
 
-## Features
+## Platform Switcher (Android ⇄ iOS)
 
-- Works on the current selection only — a frame or a section.
-- Components are matched strictly by their `Platform` component property.
-- Nested components that have their own `Platform` property are switched
-  **sequentially, from the outermost to the deepest** — each nested switch
-  is verified against the component set before it is applied.
-- Other overrides are preserved across the switch:
-  - nested component properties (a switch that is ON on Android stays ON on iOS),
-  - image fills on nested layers (matched by layer name),
-  - swapped nested components (INSTANCE_SWAP) are mapped to the target
-    platform variant of their component set.
-- Click the arrow between the Android and Apple icons to reverse the
-  direction (iOS → Android); the arrow animates.
-- Text overrides are intentionally **not** restored — they fall back to the
-  target variant defaults.
-- If any selected instance references a broken library or a deleted
-  component, nothing is switched and a red error lists the broken instances.
+Figma-плагин, который переключает вариантное свойство (по умолчанию `Platform`)
+у инстансов компонентов с `Android` на `iOS` (или в обратную сторону),
+**сохраняя все остальные оверрайды**.
 
-## How it works
+## Что сохраняется
 
-1. Before switching, the plugin takes a snapshot of every nested instance:
-   its `componentProperties`, and image fills of any layer, each stored with
-   a path (layer name + index among same-named siblings).
-2. The `Platform` property is changed on the root instance.
-3. The snapshot is re-applied by path on the new variant structure,
-   processing nested instances outermost-first.
+- Состояния вложенных компонентов: включённый свитч / чекбокс на Android
+  останется включённым на iOS.
+- Вложенные инстансы любой глубины: обрабатываются от верхних уровней
+  к глубоким, переключение `Platform` у вложенного компонента не сбрасывает
+  оверрайды ещё глубже.
+- Текстовые оверрайды (characters), включая многострочные.
+- Свапнутые вложенные компоненты (INSTANCE_SWAP): если свапнутый компонент
+  сам вариант со свойством `Platform`, подбирается соответствующий вариант
+  под целевую платформу.
 
-## Install from source
+## Как это работает
+
+1. Перед переключением делается снапшот: рекурсивно запоминаются
+   `componentProperties` каждого вложенного инстанса и текст каждого
+   текстового слоя вместе с путём (имя слоя + индекс среди одноимённых).
+2. На корневом инстансе переключается `Platform`.
+3. Снапшот применяется обратно по сохранённым путям. Свойства, которых нет
+   в новом варианте, пропускаются и попадают в отчёт.
+
+## Установка
 
 1. Figma → **Plugins → Development → Import plugin from manifest…**
-2. Choose `manifest.json` from this folder.
-3. Run via **Plugins → Development → Platform Switcher (Android ⇄ iOS)**.
+2. Выберите файл `manifest.json` из этой папки.
+3. Запуск: **Plugins → Development → Platform Switcher (Android ⇄ iOS)**.
 
-## Files
+## Использование
 
-| File | Purpose |
-|---|---|
-| `manifest.json` | Plugin manifest (id, no network access) |
-| `code.js` | Plugin main (selection scan, snapshot, switching logic) |
-| `ui.html` | Plugin UI (design-matched, English) |
-| `assets/` | SVG sources of the Android / arrow / Apple icons |
-| `PUBLISHING.md` | Figma Community publication checklist and texts (RU) |
+1. Выделите фреймы/инстансы (или выберите режим «На всей текущей странице»).
+2. При необходимости измените имя свойства и значения «С» / «На»
+   (по умолчанию `Platform`, `Android` → `iOS`).
+3. Нажмите **«Проверить (без изменений)»** — dry-run: плагин найдёт целевые
+   варианты в компонент-сетах и сверит со снапшотом оверрайдов, ничего
+   не меняя в документе. Отчёт покажет:
+   - сколько инстансов можно переключить (у кого есть целевой вариант);
+   - сколько оверрайдов будет восстановлено;
+   - что слетит: слои, отсутствующие в целевом варианте (сверка по имени),
+     свойства, которых нет у нового варианта, вложенные инстансы без
+     целевого `Platform`-варианта.
+4. Если отчёт устраивает — нажмите **«Переключить»**.
 
-## Limitations
+## Ограничения
 
-- Nested nodes are matched between variants by layer name and order among
-  same-named siblings. If the Android and iOS variants name their layers
-  differently, those overrides cannot be restored.
-- The target variant combination must exist in the component set.
-
-## License
-
-MIT
+- Соответствие вложенных нод между вариантами ищется по имени слоя и
+  порядку среди одноимённых. Если у Android- и iOS-вариантов слои названы
+  по-разному, такие оверрайды попадут в отчёт как пропущенные.
+- Комбинация вариантов с целевой платформой должна существовать
+  в компонент-сете, иначе Figma вернёт ошибку на такой инстанс.
