@@ -51,6 +51,12 @@
   }
   button:hover:not(:disabled) { background: #333333; }
   button:disabled { background: #A2A2A2; cursor: default; }
+  button.secondary {
+    background: #ffffff;
+    color: #000000;
+    border: 1px solid #E5E5E5;
+  }
+  button.secondary:hover:not(:disabled) { background: #F5F5F5; }
   #log {
     padding: 10px;
     background: #f5f5f5;
@@ -66,6 +72,159 @@
     color: #D7373F;
     background: #FFF5F5;
   }
+
+  /* --- Token linter --- */
+  .divider {
+    border-top: 1px solid #F0F0F0;
+  }
+  #tokens {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .token {
+    border: 1px solid #E5E5E5;
+    border-radius: 11px;
+    overflow: hidden;
+  }
+  .token-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .token-head:hover { background: #F5F5F5; }
+  .token-name {
+    font-size: 11px;
+    word-break: break-all;
+    color: #1e1e1e;
+  }
+  .token-count {
+    flex-shrink: 0;
+    background: #FFF5F5;
+    color: #D7373F;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+  }
+  .ios-status {
+    padding: 8px 12px;
+    font-size: 11px;
+    color: #A2A2A2;
+  }
+  .empty {
+    font-size: 12px;
+    color: #34A853;
+  }
+
+  /* --- Модальное окно со списком iOS-токенов --- */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: #ffffff;
+    display: none;
+    padding: 0;
+    z-index: 10;
+  }
+  #overlay.open { display: block; }
+  #modal {
+    background: #ffffff;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #modalHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 12px 0;
+  }
+  #modalTitle {
+    font-size: 12px;
+    color: #A2A2A2;
+    word-break: break-all;
+  }
+  #modalClose {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 6px;
+    background: #F5F5F5;
+    color: #1e1e1e;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  #modalClose:hover { background: #EAEAEA; }
+  #modalSearch {
+    padding: 10px 12px;
+  }
+  #iosSearch {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid #E5E5E5;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+  #iosSearch:focus { border-color: #1e1e1e; }
+  #iosList {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 0 8px;
+  }
+  .ios-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+    font-size: 11px;
+    word-break: break-all;
+  }
+  .ios-item:hover { background: #F5F5F5; }
+  .ios-item .body {
+    flex: 1;
+    min-width: 0;
+  }
+  .ios-item .src {
+    display: block;
+    color: #A2A2A2;
+    margin-top: 2px;
+  }
+  .ios-item .swatch {
+    width: 24px;
+    height: 24px;
+    margin-right: 0;
+    vertical-align: top;
+  }
+  .swatch {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    border: 1px solid #E0E0E0;
+    background: #ffffff;
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+  #modalTitle {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+  #modalTitle .token-name { word-break: break-all; }
 </style>
 </head>
 <body>
@@ -92,59 +251,344 @@
   <button id="run">Switch</button>
   <div id="log"></div>
 
+  <div class="divider"></div>
+
+  <div class="title">Android tokens</div>
+  <button id="lint" class="secondary">Find Android tokens</button>
+  <div id="tokens"></div>
+
+  <div id="overlay">
+    <div id="modal">
+      <div id="modalHeader">
+        <div id="modalTitle"></div>
+        <button id="modalClose" title="Close">✕</button>
+      </div>
+      <div id="modalSearch">
+        <input type="text" id="iosSearch" placeholder="Search iOS tokens…" />
+      </div>
+      <div id="iosList"></div>
+    </div>
+  </div>
+
 <script>
+  const PREFIX_ANDROID = 'A_MZ';
+  const PREFIX_IOS = 'I_MZ';
+
   const btn = document.getElementById('run');
+  const lintBtn = document.getElementById('lint');
   const log = document.getElementById('log');
+  const tokensEl = document.getElementById('tokens');
   const arrowCell = document.getElementById('arrowCell');
+
+  const overlay = document.getElementById('overlay');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalClose = document.getElementById('modalClose');
+  const iosSearch = document.getElementById('iosSearch');
+  const iosList = document.getElementById('iosList');
 
   // false: Android → iOS; true: iOS → Android
   let reverse = false;
+
+  let lintTokens = [];
+  let iosTokensCache = null;
+  let iosTokensError = null;
+  let iosRequested = false;
+  let selectedToken = null;   // Android-токен, открытый в модальном окне
+  let remapping = false;
+  const colorCache = {};        // key переменной -> css-цвет | null
+  const colorRequested = new Set(); // ключи, для которых уже запрошен цвет
 
   arrowCell.onclick = () => {
     reverse = !reverse;
     arrowCell.classList.toggle('flipped', reverse);
   };
 
+  function post(msg) {
+    parent.postMessage({ pluginMessage: msg }, '*');
+  }
+
   btn.onclick = () => {
     btn.disabled = true;
-    parent.postMessage({ pluginMessage: { type: 'run', reverse } }, '*');
+    post({ type: 'run', reverse });
   };
 
-  onmessage = (event) => {
-    const msg = event.data.pluginMessage;
-    if (!msg || (msg.type !== 'done' && msg.type !== 'error')) return;
-    btn.disabled = false;
+  // ---------- Token linter ----------
 
-    log.classList.remove('error');
+  function sendLint() {
+    lintBtn.disabled = true;
+    tokensEl.innerHTML = '<div class="ios-status">Scanning…</div>';
+    post({ type: 'lint', prefix: PREFIX_ANDROID });
+  }
 
-    if (msg.type === 'error') {
-      const lines = [
-        'Cannot switch: some components reference a broken library or deleted components.',
-        'Fix the library connection first, then try again.',
-        '',
-      ];
-      msg.names.forEach((n) => lines.push('• ' + n));
-      if (msg.total > msg.names.length) {
-        lines.push(`…and ${msg.total - msg.names.length} more`);
-      }
-      log.classList.add('error');
-      log.style.display = 'block';
-      log.textContent = lines.join('\n');
+  lintBtn.onclick = sendLint;
+
+  function requestIosTokens() {
+    if (iosRequested) return;
+    iosRequested = true;
+    post({ type: 'listIosTokens', prefix: PREFIX_IOS });
+  }
+
+  function makeSwatch(color) {
+    const sw = document.createElement('span');
+    sw.className = 'swatch';
+    if (color) sw.style.background = color;
+    return sw;
+  }
+
+  function renderTokens() {
+    if (lintTokens.length === 0) {
+      tokensEl.innerHTML = '<div class="empty">No ' + PREFIX_ANDROID + ' tokens left ✅</div>';
       return;
     }
 
-    const r = msg.report;
-    const lines = [];
-    if (msg.empty) {
-      const from = reverse ? 'iOS' : 'Android';
-      lines.push(`Select a frame or section with components where Platform = ${from}.`);
-    } else {
-      lines.push('✅ Switched');
-      lines.push(`Root instances: ${r.switched}`);
-      lines.push(`Nested components: ${r.nestedSwitched}`);
+    tokensEl.innerHTML = '';
+    for (const t of lintTokens) {
+      const box = document.createElement('div');
+      box.className = 'token';
+
+      const head = document.createElement('div');
+      head.className = 'token-head';
+      const name = document.createElement('span');
+      name.className = 'token-name';
+      name.appendChild(makeSwatch(t.color));
+      name.appendChild(document.createTextNode(t.name));
+      const count = document.createElement('span');
+      count.className = 'token-count';
+      count.textContent = String(t.count);
+      head.appendChild(name);
+      head.appendChild(count);
+      head.onclick = () => openModal(t);
+      box.appendChild(head);
+
+      tokensEl.appendChild(box);
     }
-    log.style.display = 'block';
-    log.textContent = lines.join('\n');
+  }
+
+  // ---------- Модальное окно со списком iOS-токенов ----------
+
+  function openModal(token) {
+    selectedToken = token;
+    modalTitle.innerHTML = '';
+    modalTitle.appendChild(makeSwatch(token.color));
+    const titleName = document.createElement('span');
+    titleName.className = 'token-name';
+    titleName.textContent = token.name;
+    modalTitle.appendChild(titleName);
+    iosSearch.value = '';
+    overlay.classList.add('open');
+    requestIosTokens();
+    renderIosList('');
+    setTimeout(() => iosSearch.focus(), 0);
+  }
+
+  function closeModal() {
+    if (remapping) return;
+    overlay.classList.remove('open');
+    selectedToken = null;
+  }
+
+  modalClose.onclick = closeModal;
+  overlay.onclick = (e) => {
+    if (e.target === overlay) closeModal();
+  };
+  iosSearch.oninput = () => renderIosList(iosSearch.value);
+
+  // Ленивая подгрузка превью цвета: значения библиотечных переменных
+  // доступны только после импорта, поэтому запрашиваем цвета порциями —
+  // только для токенов, видимых в окне списка.
+  function requestPreviewColors(keys) {
+    const fresh = keys.filter((k) => !(k in colorCache) && !colorRequested.has(k));
+    if (!fresh.length) return;
+    fresh.forEach((k) => colorRequested.add(k));
+    post({ type: 'previewColors', keys: fresh.slice(0, 100) });
+  }
+
+  function requestVisibleColors() {
+    if (!iosTokensCache) return;
+    const items = iosList.querySelectorAll('.ios-item');
+    const top = iosList.scrollTop;
+    const bottom = top + iosList.clientHeight;
+    const keys = [];
+    items.forEach((el) => {
+      if (el.offsetTop + el.offsetHeight >= top && el.offsetTop <= bottom && el.dataset.key) {
+        keys.push(el.dataset.key);
+      }
+    });
+    requestPreviewColors(keys);
+  }
+
+  iosList.onscroll = requestVisibleColors;
+
+  function renderIosList(filter) {
+    const q = (filter || '').trim().toLowerCase();
+    iosList.innerHTML = '';
+
+    if (iosTokensError) {
+      iosList.innerHTML = '<div class="ios-status">Failed to load iOS tokens: ' +
+        escapeHtml(iosTokensError) + '</div>';
+      return;
+    }
+    if (!iosTokensCache) {
+      iosList.innerHTML = '<div class="ios-status">Loading iOS tokens from library…</div>';
+      return;
+    }
+
+    const filtered = q
+      ? iosTokensCache.filter((t) => t.name.toLowerCase().includes(q))
+      : iosTokensCache;
+
+    if (filtered.length === 0) {
+      iosList.innerHTML = '<div class="ios-status">' +
+        (q ? 'Nothing found for «' + escapeHtml(filter) + '».' :
+             'No tokens with prefix ' + PREFIX_IOS + ' found.') +
+        '</div>';
+      return;
+    }
+
+    for (const it of filtered) {
+      const item = document.createElement('div');
+      item.className = 'ios-item';
+      item.dataset.key = it.key;
+
+      const sw = makeSwatch(colorCache[it.key]);
+      sw.dataset.swatch = it.key;
+      item.appendChild(sw);
+
+      const body = document.createElement('div');
+      body.className = 'body';
+      const nameLine = document.createElement('div');
+      nameLine.appendChild(document.createTextNode(it.name));
+      body.appendChild(nameLine);
+
+      const src = document.createElement('span');
+      src.className = 'src';
+      src.textContent = it.library + ' / ' + it.collection;
+      body.appendChild(src);
+      item.appendChild(body);
+
+      if (!remapping) {
+        item.onclick = () => {
+          if (!selectedToken) return;
+          remapping = true;
+          iosList.innerHTML = '<div class="ios-status">Replacing with ' +
+            escapeHtml(it.name) + '…</div>';
+          post({
+            type: 'remap',
+            usages: selectedToken.usages,
+            iosKey: it.key,
+            iosName: it.name,
+          });
+        };
+      }
+      iosList.appendChild(item);
+    }
+
+    // Подгружаем превью для изначально видимых токенов.
+    setTimeout(requestVisibleColors, 0);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  // ---------- Messages from code.js ----------
+
+  onmessage = (event) => {
+    const msg = event.data.pluginMessage;
+    if (!msg) return;
+
+    if (msg.type === 'done' || msg.type === 'error') {
+      btn.disabled = false;
+      log.classList.remove('error');
+
+      if (msg.type === 'error') {
+        const lines = [
+          'Cannot switch: some components reference a broken library or deleted components.',
+          'Fix the library connection first, then try again.',
+          '',
+        ];
+        msg.names.forEach((n) => lines.push('• ' + n));
+        if (msg.total > msg.names.length) {
+          lines.push(`…and ${msg.total - msg.names.length} more`);
+        }
+        log.classList.add('error');
+        log.style.display = 'block';
+        log.textContent = lines.join('\n');
+        return;
+      }
+
+      const r = msg.report;
+      const lines = [];
+      if (msg.empty) {
+        const from = reverse ? 'iOS' : 'Android';
+        lines.push(`Select a frame or section with components where Platform = ${from}.`);
+      } else {
+        lines.push('✅ Switched');
+        lines.push(`Root instances: ${r.switched}`);
+        lines.push(`Nested components: ${r.nestedSwitched}`);
+      }
+      log.style.display = 'block';
+      log.textContent = lines.join('\n');
+
+      // Auto-run the linter after a successful Android → iOS switch.
+      if (!msg.empty && !reverse) sendLint();
+      return;
+    }
+
+    if (msg.type === 'lintDone') {
+      lintBtn.disabled = false;
+      if (msg.error) {
+        tokensEl.innerHTML = '<div class="ios-status">Lint error: ' + escapeHtml(msg.error) + '</div>';
+        return;
+      }
+      lintTokens = msg.tokens || [];
+      if (selectedToken && !lintTokens.some((t) => t.name === selectedToken.name)) {
+        selectedToken = null;
+        overlay.classList.remove('open');
+      }
+      renderTokens();
+      return;
+    }
+
+    if (msg.type === 'iosTokens') {
+      iosTokensError = msg.error || null;
+      iosTokensCache = msg.error ? null : (msg.tokens || []);
+      if (overlay.classList.contains('open')) renderIosList(iosSearch.value);
+      return;
+    }
+
+    if (msg.type === 'tokenColors') {
+      Object.assign(colorCache, msg.colors || {});
+      // Обновляем свотчи на месте, чтобы не сбрасывать скролл и поиск.
+      iosList.querySelectorAll('.swatch').forEach((sw) => {
+        const k = sw.dataset.swatch;
+        if (k && colorCache[k]) sw.style.background = colorCache[k];
+      });
+      return;
+    }
+
+    if (msg.type === 'remapDone') {
+      remapping = false;
+      overlay.classList.remove('open');
+      selectedToken = null;
+
+      const rep = msg.report;
+      const lines = [`Replaced with ${msg.iosName}: ${rep.replaced} binding(s) updated`];
+      if (rep.failed.length) {
+        lines.push('', 'Failed:');
+        rep.failed.slice(0, 20).forEach((s) => lines.push('• ' + s));
+        if (rep.failed.length > 20) lines.push(`…and ${rep.failed.length - 20} more`);
+      }
+      log.classList.remove('error');
+      log.style.display = 'block';
+      log.textContent = lines.join('\n');
+
+      // Refresh the list: the replaced Android token should disappear.
+      sendLint();
+      return;
+    }
   };
 </script>
 </body>
